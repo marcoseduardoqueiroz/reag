@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template para hospedar uma aplicação React e processar arquivos com Lambda
+
+Parameters:
+  ProcessingBucket:
+    Type: String
+    Default: "carteiras-empresa-prod"
+    Description: Nome do bucket para processamento
+
+Resources:
+
+  # Bucket para a aplicação React
+  ReactAppBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: "CarteirasEmpresaBucket"
+      AccessControl: Private
+
+  # Bucket para processamento
+  ProcessingBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref ProcessingBucket
+      AccessControl: Private
+
+  # Pasta uploads no bucket de processamento
+  UploadsFolder:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref ProcessingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${ProcessingBucket.Arn}/uploads/*"
+
+  # Pasta processed no bucket de processamento
+  ProcessedFolder:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref ProcessingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${ProcessingBucket.Arn}/processed/*"
+
+  # Pasta backups no bucket de processamento
+  BackupsFolder:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref ProcessingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${ProcessingBucket.Arn}/backups/*"
+
+  # Role para a função Lambda
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: LambdaS3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:*"
+                  - "s3:GetObject"
+                Resource:
+                  - "*"
+
+  # Função Lambda
+  MyLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ProcessingBucket
+        S3Key: my-lambda-function.zip  # Nome do arquivo ZIP
+      Runtime: nodejs14.x
+      MemorySize: 128
+      Timeout: 30
+
+  # Trigger para a função Lambda
+  S3EventNotification:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref ProcessingBucket
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt MyLambdaFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: ".csv"  # Filtra apenas arquivos .csv
+
+Outputs:
+  ReactAppBucketOutput:
+    Description: "Bucket para a aplicação React"
+    Value: !Ref ReactAppBucket
+
+  ProcessingBucketOutput:
+    Description: "Bucket para processamento"
+    Value: !Ref ProcessingBucket
+
+  LambdaFunctionOutput:
+    Description: "Função Lambda"
+    Value: !Ref MyLambdaFunction
